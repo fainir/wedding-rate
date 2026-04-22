@@ -1,26 +1,110 @@
 @import "tailwindcss";
 
+@theme {
+  /* Gold palette */
+  --color-gold-50: #fffbf0;
+  --color-gold-100: #fef3c7;
+  --color-gold-200: #fde68a;
+  --color-gold-300: #f5c75a;
+  --color-gold-400: #e8b040;
+  --color-gold-500: #c9963c;
+  --color-gold-600: #a87a2c;
+  --color-gold-700: #8b6914;
+  --color-gold-800: #6b5010;
+  --color-gold-900: #4a3808;
+
+  /* Ivory */
+  --color-ivory: #fbf8f3;
+  --color-ivory-dark: #f0ebe1;
+  --color-ivory-darker: #e4d9c8;
+
+  /* Wedding text */
+  --color-wedding-text: #2d2416;
+  --color-wedding-muted: #9c8a6a;
+  --color-wedding-border: #e8d9c0;
+
+  /* Fonts */
+  --font-playfair: "Playfair Display", Georgia, serif;
+  --font-lato: "Lato", system-ui, sans-serif;
+  --font-heebo: "Heebo", system-ui, sans-serif;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fbf8f3;
+  --foreground: #2d2416;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-lato), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+html[lang="he"] body,
+html[dir="rtl"] body {
+  font-family: var(--font-heebo), system-ui, sans-serif;
+}
+
+/* Gold ring focus visible */
+*:focus-visible {
+  outline: 2px solid var(--color-gold-500);
+  outline-offset: 2px;
+}
+
+/* Smooth transitions */
+* {
+  transition-property: color, background-color, border-color, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+/* Prevent transition on page load */
+.no-transition * {
+  transition: none !important;
+}
+
+/* Star rating */
+.star-rating {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.star-btn {
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  line-height: 1;
+  font-size: 1.75rem;
+  transition: transform 100ms ease-out;
+}
+
+.star-btn:hover {
+  transform: scale(1.15);
+}
+
+/* Decorative divider */
+.gold-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-gold-400),
+    transparent
+  );
+}
+
+/* Card hover lift */
+.card-hover {
+  transition: box-shadow 200ms ease-out, transform 200ms ease-out;
+}
+
+.card-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -4px rgba(139, 105, 20, 0.12);
 }
