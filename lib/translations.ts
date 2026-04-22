@@ -96,8 +96,10 @@ const en = {
     backToRating: "Rate Vendors",
     averageRating: "Average",
     reviews: "reviews",
+    totalReviews: "total reviews",
     noReviews: "No reviews yet",
     anonymous: "Anonymous guest",
+    leaveReview: "Leave a Review",
   },
   auth: {
     loginTitle: "Welcome Back",
@@ -226,8 +228,10 @@ const he: typeof en = {
     backToRating: "דרגו ספקים",
     averageRating: "ממוצע",
     reviews: "ביקורות",
+    totalReviews: "ביקורות סה\"כ",
     noReviews: "אין ביקורות עדיין",
     anonymous: "אורח/ת אנונימי/ת",
+    leaveReview: "השאר ביקורת",
   },
   auth: {
     loginTitle: "ברוכים השבים",

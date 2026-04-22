@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 import type { Wedding, Review } from "@/lib/db";
+
+const MAX_TEXT = 1000;
+const MAX_NAME = 100;
 
 // GET — fetch reviews for the wedding (with optional guestToken check)
 export async function GET(
@@ -17,35 +21,40 @@ export async function GET(
       .get(slug) as Wedding | undefined;
 
     if (!wedding) {
-      return NextResponse.json({ error: "Wedding not found." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Wedding not found." },
+        { status: 404 }
+      );
     }
 
     const { searchParams } = new URL(request.url);
-    const guestToken = searchParams.get("guestToken");
+    const guestToken = searchParams.get("guestToken")?.slice(0, 64);
 
     if (guestToken) {
-      // Check if this guest already has reviews
       const myReviews = db
         .prepare(
           "SELECT * FROM reviews WHERE wedding_id = ? AND guest_token = ?"
         )
         .all(wedding.id, guestToken) as Review[];
-
       return NextResponse.json({
         hasReviewed: myReviews.length > 0,
         myReviews,
       });
     }
 
-    // Return all reviews for the wedding
     const reviews = db
-      .prepare("SELECT * FROM reviews WHERE wedding_id = ? ORDER BY created_at DESC")
+      .prepare(
+        "SELECT * FROM reviews WHERE wedding_id = ? ORDER BY created_at DESC"
+      )
       .all(wedding.id) as Review[];
 
     return NextResponse.json({ reviews });
   } catch (err) {
     console.error("Get reviews error:", err);
-    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error." },
+      { status: 500 }
+    );
   }
 }
 
@@ -54,6 +63,16 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
 ) {
+  // Rate limit: 20 review submissions per minute per IP
+  const ip = getClientIp(request.headers);
+  const rl = checkRateLimit(`reviews:${ip}`, 20, 60 * 1000);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   try {
     const { slug } = await params;
     const db = getDb();
@@ -63,22 +82,26 @@ export async function POST(
       .get(slug) as Wedding | undefined;
 
     if (!wedding) {
-      return NextResponse.json({ error: "Wedding not found." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Wedding not found." },
+        { status: 404 }
+      );
     }
 
     const body = await request.json();
-    const { reviews, guestToken } = body as {
-      reviews: {
-        contractorId: number;
-        rating: number;
-        reviewText?: string;
-        reviewerName?: string;
-      }[];
-      guestToken?: string;
-    };
+    const guestToken = body.guestToken
+      ? String(body.guestToken).slice(0, 64)
+      : null;
 
-    if (!Array.isArray(reviews) || reviews.length === 0) {
-      return NextResponse.json({ error: "No reviews provided." }, { status: 400 });
+    const rawReviews = Array.isArray(body.reviews)
+      ? body.reviews.slice(0, 50) // cap to 50 reviews per submission
+      : [];
+
+    if (rawReviews.length === 0) {
+      return NextResponse.json(
+        { error: "No reviews provided." },
+        { status: 400 }
+      );
     }
 
     // Get session user if logged in
@@ -96,24 +119,34 @@ export async function POST(
     );
 
     const insert = db.prepare(
-      `INSERT OR IGNORE INTO reviews
-       (contractor_id, wedding_id, rating, review_text, reviewer_name, user_id, guest_token)
+      `INSERT INTO reviews
+         (contractor_id, wedding_id, rating, review_text, reviewer_name, user_id, guest_token)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
 
     let inserted = 0;
-    const insertAll = db.transaction(() => {
-      for (const r of reviews) {
-        if (!validIds.has(r.contractorId)) continue;
-        if (r.rating < 1 || r.rating > 5) continue;
+    db.transaction(() => {
+      for (const r of rawReviews) {
+        const contractorId = Number(r.contractorId);
+        const rating = Number(r.rating);
 
-        // Check for duplicate (guest or user)
+        if (!validIds.has(contractorId)) continue;
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) continue;
+
+        const reviewText = r.reviewText
+          ? String(r.reviewText).trim().slice(0, MAX_TEXT)
+          : null;
+        const reviewerName = r.reviewerName
+          ? String(r.reviewerName).trim().slice(0, MAX_NAME)
+          : null;
+
+        // Duplicate check — one review per contractor per guest OR per user
         if (guestToken) {
           const dup = db
             .prepare(
               "SELECT id FROM reviews WHERE contractor_id = ? AND guest_token = ?"
             )
-            .get(r.contractorId, guestToken);
+            .get(contractorId, guestToken);
           if (dup) continue;
         }
         if (userId) {
@@ -121,28 +154,29 @@ export async function POST(
             .prepare(
               "SELECT id FROM reviews WHERE contractor_id = ? AND user_id = ?"
             )
-            .get(r.contractorId, userId);
+            .get(contractorId, userId);
           if (dup) continue;
         }
 
         insert.run(
-          r.contractorId,
+          contractorId,
           wedding.id,
-          r.rating,
-          r.reviewText?.trim() || null,
-          r.reviewerName?.trim() || null,
+          rating,
+          reviewText,
+          reviewerName,
           userId,
-          guestToken || null
+          guestToken
         );
         inserted++;
       }
-    });
-
-    insertAll();
+    })();
 
     return NextResponse.json({ ok: true, inserted });
   } catch (err) {
     console.error("Submit reviews error:", err);
-    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error." },
+      { status: 500 }
+    );
   }
 }

@@ -5,6 +5,7 @@ import { Header } from "@/components/Header";
 import { StarRating } from "@/components/StarRating";
 import { getDb } from "@/lib/db";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import { getServerT } from "@/lib/serverTranslations";
 
 interface ReviewRow {
   id: number;
@@ -16,23 +17,6 @@ interface ReviewRow {
   contractor_category: string;
   couple_name: string;
   slug: string;
-}
-
-async function getUserReviews(userId: number): Promise<ReviewRow[]> {
-  const db = getDb();
-  return db
-    .prepare(
-      `SELECT
-        r.id, r.rating, r.review_text, r.reviewer_name, r.created_at,
-        c.name AS contractor_name, c.category AS contractor_category,
-        w.couple_name, w.slug
-       FROM reviews r
-       JOIN contractors c ON r.contractor_id = c.id
-       JOIN weddings w ON r.wedding_id = w.id
-       WHERE r.user_id = ?
-       ORDER BY r.created_at DESC`
-    )
-    .all(userId) as ReviewRow[];
 }
 
 const CATEGORY_EMOJI: Record<string, string> = {
@@ -55,7 +39,11 @@ const CATEGORY_EMOJI: Record<string, string> = {
 };
 
 export default async function MyReviewsPage() {
-  const cookieStore = await cookies();
+  const [cookieStore, { t }] = await Promise.all([
+    cookies(),
+    getServerT(),
+  ]);
+
   const token = cookieStore.get(COOKIE_NAME)?.value;
   const session = token ? verifyToken(token) : null;
 
@@ -63,7 +51,20 @@ export default async function MyReviewsPage() {
     redirect("/login");
   }
 
-  const reviews = await getUserReviews(session.userId);
+  const db = getDb();
+  const reviews = db
+    .prepare(
+      `SELECT
+         r.id, r.rating, r.review_text, r.reviewer_name, r.created_at,
+         c.name AS contractor_name, c.category AS contractor_category,
+         w.couple_name, w.slug
+       FROM reviews r
+       JOIN contractors c ON r.contractor_id = c.id
+       JOIN weddings w ON r.wedding_id = w.id
+       WHERE r.user_id = ?
+       ORDER BY r.created_at DESC`
+    )
+    .all(session.userId) as ReviewRow[];
 
   return (
     <>
@@ -73,20 +74,18 @@ export default async function MyReviewsPage() {
           className="text-3xl font-bold text-wedding-text mb-2"
           style={{ fontFamily: "var(--font-playfair), serif" }}
         >
-          My Reviews
+          {t.myReviews.title}
         </h1>
         <p className="text-wedding-muted text-sm mb-8">
-          Hi {session.name} · {reviews.length} review{reviews.length !== 1 ? "s" : ""}
+          {session.name} · {reviews.length} {t.results.reviews}
         </p>
 
         {reviews.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-5xl mb-4">📭</p>
-            <p className="text-wedding-muted mb-4">
-              You haven&apos;t written any reviews yet.
-            </p>
+            <p className="text-wedding-muted mb-2">{t.myReviews.noReviews}</p>
             <p className="text-sm text-wedding-muted">
-              Visit a wedding link to leave reviews for vendors.
+              {t.myReviews.browseWeddings}
             </p>
           </div>
         ) : (
@@ -106,7 +105,7 @@ export default async function MyReviewsPage() {
                         {r.contractor_name}
                       </p>
                       <p className="text-xs text-gold-600 uppercase tracking-widest">
-                        {r.contractor_category}
+                        {t.categories[r.contractor_category] ?? r.contractor_category}
                       </p>
                       <Link
                         href={`/wedding/${r.slug}/results`}

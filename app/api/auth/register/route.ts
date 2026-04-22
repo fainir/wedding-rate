@@ -2,10 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getDb } from "@/lib/db";
 import { createToken, getCookieOptions, COOKIE_NAME } from "@/lib/auth";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
 
 export async function POST(request: NextRequest) {
+  // Rate limit: 3 registrations per hour per IP
+  const ip = getClientIp(request.headers);
+  const rl = checkRateLimit(`register:${ip}`, 3, 60 * 60 * 1000);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many accounts created. Please try again later." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   try {
-    const { name, email, password } = await request.json();
+    const body = await request.json();
+    const name = String(body.name ?? "").trim().slice(0, 100);
+    const email = String(body.email ?? "").trim().toLowerCase().slice(0, 254);
+    const password = String(body.password ?? "").slice(0, 128);
 
     if (!name || !email || !password) {
       return NextResponse.json(
@@ -19,11 +33,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // Basic email shape check
+    if (!email.includes("@") || !email.includes(".")) {
+      return NextResponse.json(
+        { error: "Please enter a valid email address." },
+        { status: 400 }
+      );
+    }
 
     const db = getDb();
     const existing = db
       .prepare("SELECT id FROM users WHERE email = ?")
-      .get(email.toLowerCase().trim());
+      .get(email);
 
     if (existing) {
       return NextResponse.json(
@@ -37,10 +58,10 @@ export async function POST(request: NextRequest) {
       .prepare(
         "INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)"
       )
-      .run(email.toLowerCase().trim(), name.trim(), hash);
+      .run(email, name, hash);
 
     const userId = result.lastInsertRowid as number;
-    const token = createToken({ userId, email: email.toLowerCase().trim(), name: name.trim() });
+    const token = createToken({ userId, email, name });
 
     const res = NextResponse.json(
       { user: { userId, email, name } },
@@ -54,6 +75,9 @@ export async function POST(request: NextRequest) {
     return res;
   } catch (err) {
     console.error("Register error:", err);
-    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error." },
+      { status: 500 }
+    );
   }
 }

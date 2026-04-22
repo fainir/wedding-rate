@@ -4,6 +4,7 @@ import { Header } from "@/components/Header";
 import { StarDisplay } from "@/components/StarRating";
 import { ReviewCard } from "@/components/ReviewCard";
 import { getDb } from "@/lib/db";
+import { getServerT } from "@/lib/serverTranslations";
 
 interface ContractorWithReviews {
   id: number;
@@ -45,20 +46,40 @@ async function getResultsData(slug: string) {
 
   const wedding = db
     .prepare("SELECT * FROM weddings WHERE slug = ?")
-    .get(slug) as { id: number; couple_name: string; wedding_date: string | null; location: string | null } | undefined;
+    .get(slug) as
+    | {
+        id: number;
+        couple_name: string;
+        wedding_date: string | null;
+        location: string | null;
+      }
+    | undefined;
 
   if (!wedding) return null;
 
   const contractors = db
-    .prepare("SELECT * FROM contractors WHERE wedding_id = ? ORDER BY created_at ASC")
-    .all(wedding.id) as { id: number; category: string; name: string; description: string | null }[];
+    .prepare(
+      "SELECT * FROM contractors WHERE wedding_id = ? ORDER BY created_at ASC"
+    )
+    .all(wedding.id) as {
+    id: number;
+    category: string;
+    name: string;
+    description: string | null;
+  }[];
 
   const results: ContractorWithReviews[] = contractors.map((c) => {
     const reviews = db
       .prepare(
         "SELECT id, reviewer_name, rating, review_text, created_at FROM reviews WHERE contractor_id = ? ORDER BY created_at DESC"
       )
-      .all(c.id) as { id: number; reviewer_name: string | null; rating: number; review_text: string | null; created_at: string }[];
+      .all(c.id) as {
+      id: number;
+      reviewer_name: string | null;
+      rating: number;
+      review_text: string | null;
+      created_at: string;
+    }[];
 
     const count = reviews.length;
     const avgRating =
@@ -76,25 +97,27 @@ export default async function ResultsPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const data = await getResultsData(slug);
+  const [data, { t }] = await Promise.all([
+    getResultsData(slug),
+    getServerT(),
+  ]);
 
   if (!data) notFound();
 
   const { wedding, results } = data;
   const totalReviews = results.reduce((s, c) => s + c.count, 0);
+  const ratedContractors = results.filter((c) => c.count > 0);
   const overallAvg =
-    totalReviews > 0
-      ? results
-          .filter((c) => c.count > 0)
-          .reduce((s, c) => s + c.avgRating, 0) /
-        results.filter((c) => c.count > 0).length
+    ratedContractors.length > 0
+      ? ratedContractors.reduce((s, c) => s + c.avgRating, 0) /
+        ratedContractors.length
       : 0;
 
   return (
     <>
       <Header />
       <main className="max-w-2xl mx-auto px-4 py-8">
-        {/* Header */}
+        {/* Wedding header */}
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">📊</div>
           <h1
@@ -111,7 +134,7 @@ export default async function ResultsPage({
             </p>
           )}
 
-          {/* Summary */}
+          {/* Summary pill */}
           <div className="inline-flex items-center gap-3 bg-gold-50 border border-gold-200 rounded-2xl px-6 py-3">
             {overallAvg > 0 && (
               <>
@@ -121,45 +144,44 @@ export default async function ResultsPage({
             )}
             <div>
               <p className="text-2xl font-bold text-gold-700">{totalReviews}</p>
-              <p className="text-xs text-wedding-muted">total reviews</p>
+              <p className="text-xs text-wedding-muted">{t.results.totalReviews}</p>
             </div>
           </div>
 
           <div className="gold-divider my-5 max-w-xs mx-auto" />
         </div>
 
-        {/* Back + Rate link */}
+        {/* Nav row */}
         <div className="flex justify-between items-center mb-6">
           <Link
             href={`/wedding/${slug}`}
             className="text-sm text-gold-600 hover:text-gold-800 flex items-center gap-1"
           >
-            ← Rate Vendors
+            ← {t.results.backToRating}
           </Link>
           <h2
             className="text-xl font-bold text-wedding-text"
             style={{ fontFamily: "var(--font-playfair), serif" }}
           >
-            Vendor Reviews
+            {t.results.title}
           </h2>
           <div />
         </div>
 
-        {/* Contractors */}
+        {/* Contractor cards */}
         <div className="space-y-6">
           {results.map((c) => (
             <section
               key={c.id}
               className="bg-white rounded-2xl border border-wedding-border overflow-hidden"
             >
-              {/* Contractor header */}
               <div className="px-5 py-4 border-b border-wedding-border/60 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">{CATEGORY_EMOJI[c.category] ?? "🌟"}</span>
                   <div>
                     <p className="font-bold text-wedding-text">{c.name}</p>
                     <p className="text-xs text-gold-600 uppercase tracking-widest">
-                      {c.category}
+                      {t.categories[c.category] ?? c.category}
                     </p>
                   </div>
                 </div>
@@ -169,12 +191,11 @@ export default async function ResultsPage({
                   </div>
                 ) : (
                   <span className="text-xs text-wedding-muted italic">
-                    No reviews yet
+                    {t.results.noReviews}
                   </span>
                 )}
               </div>
 
-              {/* Reviews */}
               {c.reviews.length > 0 ? (
                 <div className="divide-y divide-wedding-border/40">
                   {c.reviews.map((r) => (
@@ -184,14 +205,14 @@ export default async function ResultsPage({
                         rating={r.rating}
                         text={r.review_text}
                         date={r.created_at}
-                        anonymous="Anonymous guest"
+                        anonymous={t.results.anonymous}
                       />
                     </div>
                   ))}
                 </div>
               ) : (
                 <p className="px-5 py-4 text-sm text-wedding-muted italic">
-                  No reviews yet
+                  {t.results.noReviews}
                 </p>
               )}
             </section>
@@ -203,7 +224,7 @@ export default async function ResultsPage({
             href={`/wedding/${slug}`}
             className="inline-flex items-center gap-2 px-6 py-3 bg-gold-500 text-white font-semibold rounded-full hover:bg-gold-600 transition-colors"
           >
-            ⭐ Leave a Review
+            ⭐ {t.results.leaveReview}
           </Link>
         </div>
       </main>

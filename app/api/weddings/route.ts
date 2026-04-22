@@ -1,34 +1,101 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getDb } from "@/lib/db";
-import { createToken, getCookieOptions, COOKIE_NAME, verifyToken } from "@/lib/auth";
+import {
+  createToken,
+  getCookieOptions,
+  COOKIE_NAME,
+  verifyToken,
+} from "@/lib/auth";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimit";
+
+// Max field lengths
+const MAX = {
+  coupleName: 120,
+  location: 200,
+  vendorName: 100,
+  vendorDesc: 500,
+  email: 254,
+  password: 128,
+  name: 100,
+  vendors: 30, // max vendors per wedding
+};
 
 function generateSlug(coupleName: string): string {
   const base = coupleName
     .toLowerCase()
-    .replace(/[^a-z0-9\u0590-\u05ff\s]/g, "")
+    .replace(/[^a-z0-9\u0590-\u05ff\s-]/g, "")
     .replace(/\s+/g, "-")
-    .slice(0, 24)
-    .replace(/-+$/, "");
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 28);
   const random = Math.random().toString(36).slice(2, 8);
   return `${base || "wedding"}-${random}`;
 }
 
 export async function POST(request: NextRequest) {
+  // Rate limit: 10 weddings per hour per IP
+  const ip = getClientIp(request.headers);
+  const rl = checkRateLimit(`create-wedding:${ip}`, 10, 60 * 60 * 1000);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please try again later." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   try {
     const body = await request.json();
-    const { coupleName, weddingDate, location, contractors, account } = body;
 
-    if (!coupleName || !Array.isArray(contractors) || contractors.length === 0) {
+    // Validate + sanitise inputs
+    const coupleName = String(body.coupleName ?? "")
+      .trim()
+      .slice(0, MAX.coupleName);
+    const weddingDate = body.weddingDate
+      ? String(body.weddingDate).slice(0, 10)
+      : null;
+    const location = body.location
+      ? String(body.location).trim().slice(0, MAX.location)
+      : null;
+
+    if (!coupleName) {
       return NextResponse.json(
-        { error: "coupleName and at least one contractor are required." },
+        { error: "coupleName is required." },
+        { status: 400 }
+      );
+    }
+
+    const rawVendors = Array.isArray(body.contractors)
+      ? body.contractors.slice(0, MAX.vendors)
+      : [];
+    if (rawVendors.length === 0) {
+      return NextResponse.json(
+        { error: "At least one vendor is required." },
+        { status: 400 }
+      );
+    }
+
+    type VendorRow = { category: string; name: string; description: string | null };
+    const vendors: VendorRow[] = rawVendors.map(
+      (v: { category?: string; name?: string; description?: string }) => ({
+        category: String(v.category ?? "other").slice(0, 50),
+        name: String(v.name ?? "").trim().slice(0, MAX.vendorName),
+        description: v.description
+          ? String(v.description).trim().slice(0, MAX.vendorDesc)
+          : null,
+      })
+    );
+
+    if (vendors.some((v) => !v.name)) {
+      return NextResponse.json(
+        { error: "All vendors must have a name." },
         { status: 400 }
       );
     }
 
     const db = getDb();
 
-    // Determine user_id
+    // Resolve user_id
     let userId: number | null = null;
     let newToken: string | null = null;
 
@@ -40,35 +107,37 @@ export async function POST(request: NextRequest) {
     }
 
     // Create account if requested and not already logged in
-    if (!userId && account?.email && account?.password && account?.name) {
-      const existing = db
-        .prepare("SELECT id FROM users WHERE email = ?")
-        .get(account.email.toLowerCase().trim());
+    if (!userId && body.account) {
+      const acct = body.account;
+      const accEmail = String(acct.email ?? "")
+        .trim()
+        .toLowerCase()
+        .slice(0, MAX.email);
+      const accPassword = String(acct.password ?? "").slice(0, MAX.password);
+      const accName = String(acct.name ?? "").trim().slice(0, MAX.name);
 
-      if (existing) {
-        return NextResponse.json(
-          { error: "An account with this email already exists." },
-          { status: 409 }
-        );
+      if (accEmail && accPassword && accName && accPassword.length >= 8) {
+        const existing = db
+          .prepare("SELECT id FROM users WHERE email = ?")
+          .get(accEmail);
+        if (existing) {
+          return NextResponse.json(
+            { error: "An account with this email already exists." },
+            { status: 409 }
+          );
+        }
+        const hash = await bcrypt.hash(accPassword, 12);
+        const result = db
+          .prepare(
+            "INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)"
+          )
+          .run(accEmail, accName, hash);
+        userId = result.lastInsertRowid as number;
+        newToken = createToken({ userId, email: accEmail, name: accName });
       }
-
-      const hash = await bcrypt.hash(account.password, 12);
-      const result = db
-        .prepare("INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)")
-        .run(
-          account.email.toLowerCase().trim(),
-          account.name.trim(),
-          hash
-        );
-      userId = result.lastInsertRowid as number;
-      newToken = createToken({
-        userId,
-        email: account.email.toLowerCase().trim(),
-        name: account.name.trim(),
-      });
     }
 
-    // Generate unique slug
+    // Generate a unique slug
     let slug = generateSlug(coupleName);
     let attempts = 0;
     while (
@@ -84,22 +153,19 @@ export async function POST(request: NextRequest) {
       .prepare(
         "INSERT INTO weddings (slug, couple_name, wedding_date, location, user_id) VALUES (?, ?, ?, ?, ?)"
       )
-      .run(slug, coupleName.trim(), weddingDate || null, location || null, userId);
+      .run(slug, coupleName, weddingDate, location, userId);
 
     const weddingId = weddingResult.lastInsertRowid as number;
 
-    // Insert contractors
-    const insertContractor = db.prepare(
+    // Insert vendors in a transaction
+    const insertVendor = db.prepare(
       "INSERT INTO contractors (wedding_id, category, name, description) VALUES (?, ?, ?, ?)"
     );
-    const insertMany = db.transaction(
-      (items: { category: string; name: string; description?: string }[]) => {
-        for (const item of items) {
-          insertContractor.run(weddingId, item.category, item.name.trim(), item.description?.trim() || null);
-        }
+    db.transaction(() => {
+      for (const v of vendors) {
+        insertVendor.run(weddingId, v.category, v.name, v.description);
       }
-    );
-    insertMany(contractors);
+    })();
 
     const res = NextResponse.json({ slug, weddingId }, { status: 201 });
     if (newToken) {
@@ -112,6 +178,9 @@ export async function POST(request: NextRequest) {
     return res;
   } catch (err) {
     console.error("Create wedding error:", err);
-    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error." },
+      { status: 500 }
+    );
   }
 }

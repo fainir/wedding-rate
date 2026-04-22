@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { Header } from "@/components/Header";
+import { getServerT } from "@/lib/serverTranslations";
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const { t } = await getServerT();
+
   return (
     <>
       <Header />
@@ -26,23 +29,20 @@ export default function LandingPage() {
               className="text-4xl sm:text-5xl md:text-6xl font-bold text-wedding-text mb-6 leading-tight"
               style={{ fontFamily: "var(--font-playfair), serif" }}
             >
-              Rate Your{" "}
-              <span className="text-gold-600">Wedding</span> Vendors
+              {t.landing.hero.title}
             </h1>
             <p className="text-lg text-wedding-muted max-w-xl mx-auto mb-8">
-              Create a page for your wedding, share it with guests, and collect
-              honest star ratings for every vendor — DJ, photographer, venue,
-              and more.
+              {t.landing.hero.subtitle}
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link
                 href="/create"
                 className="px-8 py-3.5 bg-gold-500 text-white font-semibold rounded-full hover:bg-gold-600 transition-colors shadow-lg text-base"
               >
-                Create Your Wedding Page
+                {t.landing.hero.cta}
               </Link>
               <span className="text-sm text-wedding-muted">
-                Free · No login required for guests
+                {t.landing.hero.ctaSub}
               </span>
             </div>
           </div>
@@ -57,27 +57,27 @@ export default function LandingPage() {
               className="text-3xl font-bold text-wedding-text text-center mb-12"
               style={{ fontFamily: "var(--font-playfair), serif" }}
             >
-              How It Works
+              {t.landing.how.title}
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               {[
                 {
                   emoji: "📝",
                   num: "1",
-                  title: "Create Your Page",
-                  desc: "Add your couple names, wedding date, and all your vendors in just a few minutes.",
+                  title: t.landing.how.s1title,
+                  desc: t.landing.how.s1desc,
                 },
                 {
                   emoji: "📲",
                   num: "2",
-                  title: "Share With Guests",
-                  desc: "Send your unique link via WhatsApp, email, or SMS to all your guests.",
+                  title: t.landing.how.s2title,
+                  desc: t.landing.how.s2desc,
                 },
                 {
                   emoji: "⭐",
                   num: "3",
-                  title: "Collect Reviews",
-                  desc: "Guests rate each vendor 1–5 stars and leave comments — no account needed.",
+                  title: t.landing.how.s3title,
+                  desc: t.landing.how.s3desc,
                 },
               ].map((step) => (
                 <div key={step.num} className="text-center">
@@ -102,13 +102,13 @@ export default function LandingPage() {
         {/* Bottom CTA */}
         <section className="py-12 px-4 bg-gold-50 border-t border-wedding-border text-center">
           <p className="text-lg font-medium text-wedding-text mb-4">
-            Ready to start collecting reviews?
+            {t.landing.hero.subtitle.split(",")[0]}
           </p>
           <Link
             href="/create"
             className="inline-flex items-center gap-2 px-8 py-3 bg-gold-500 text-white font-semibold rounded-full hover:bg-gold-600 transition-colors shadow-md"
           >
-            Get started — it&apos;s free
+            {t.landing.hero.cta}
           </Link>
         </section>
       </main>
